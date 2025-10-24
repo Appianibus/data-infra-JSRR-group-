@@ -1,7 +1,14 @@
 from semmeta.metadata_extractor_module import SEMMetaData
 from semmeta.json_cleaner_module import JSONReader
 from semmeta.visualizer_module import Visualizer
+
+import json
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.image as pltimg
+
 def main():
+    output_file = None
     image_path = input("Provide image path:")
 
     sem = SEMMetaData(image_path)
@@ -34,17 +41,19 @@ def main():
     
         output_file = sem.final_out_json()
         print(f"✅ Metadata saved to {output_file}")
-        json_path = semmetadata.GetInsMetadata()
+        
 
-    cleaner = JSONReader(json_path, json_path)
+    cleaner = JSONReader(output_file, output_file)
 
     cleaner.clean()
     cleaner.save()
 
-    visualizer = Visualizer(json_path, image_path)
+    visualizer = Visualizer(output_file, image_path)
 
     visualizer.show_image()
     visualizer.display_table()
+
+main()
 
 
 
