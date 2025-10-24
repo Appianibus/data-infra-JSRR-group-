@@ -1,10 +1,11 @@
 #write python class that read a .tif file
 #write python class that read a .tif file
 import os, sys, glob
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image, ExifTags #Image processing and metadata
 import json
+import re
 
 # Class Initialization
 
@@ -12,15 +13,21 @@ class SEMMetaData:
     def __init__(self, image_metadata={}, semext=('tif','TIF'), semInsTag=[34118]):
         #semext is a tuple corresponding to the valid extension, 34118 is a TIFF tag ofte used by SEM instruments to store extra data
         #define  the following attributes: semext, image_megadata, semInsTag, images_tags (array to store image tag values)
-
-
+        self.image_metadata = image_metadata
+        self.semext = semext
+        self.semInsTag = semInsTag
+        self.images_tags = [] #it stores as an array 
 
     def OpenCheckImage(self, image):
-        """
-        Opens an image file with PILLOW library (Image.open()) and verifies accessibility and format (.tif or .TIF)
-        return the opened image object if succesful
-        """
 
+        try:
+            img = Image.open(image)
+            print(f"✅ Image opened successfully: {image}")
+            return img
+        
+        except Exception as e:
+            print(f"⚠️ Error opening image '{image}': {e}")
+            return None
 
     def ImageMetadata(self, img):
         """
@@ -86,28 +93,126 @@ class SEMMetaData:
         allexif_metadict = {**found_metadict, **none_metadict}
         return allexif_metadict
 
+    
 
+    
+
+    
+    def clean_instrument_metadata(self, raw_text):
+        """
+        Cleans and converts the SEM metadata string into key-value pairs.
+        """
+        pattern = re.compile(r"([A-Za-z0-9_\-\. %\(\)]+?)\s*=\s*([^\=]+?)(?=\s+[A-Z]{2,3}[_A-Z0-9]+|$)")
+        metadata = {}
+        for key, value in pattern.findall(raw_text):
+            key = re.sub(r'\s+', ' ', key).strip()
+            value = value.strip()
+            metadata[key] = value
+        return metadata
+
+    
     def GetInsMetadata(self):
+        tag = self.semInsTag[0]  # usually 34118
+        if tag not in self.image_metadata:
+            return []
 
-        '''
-        Extracts instrument-specific metadata from SEM image EXIF tag 34118.
-        Returns:
-            - list: a cleaned and escaped list of instrument metadata strings.
-            - and an empty list if tag 34118 is not found.
-        '''
+        raw_data = self.image_metadata[tag]
+
+        # If tuple, take first element
+        if isinstance(raw_data, tuple) and len(raw_data) > 0:
+            raw_data = raw_data[0]
+
+        # Decode bytes if necessary
+        if isinstance(raw_data, (bytes, bytearray)):
+            raw_data = raw_data.decode(errors="ignore")
+
+        # Replace line breaks, remove null chars
+        text = str(raw_data).replace("\r", " ").replace("\n", ";,|").replace("\x00", "")
+
+        # Split on common delimiters ; or , or | 
+        parts = re.split(r"[;,|]", text)
+        cleaned_list = [p.strip() for p in parts if p.strip()]
+
+        return cleaned_list
 
 
-    def InsMetaDict(self, list):   
+    def InsMetaDict(self, ins_list):
+        """
+        Convert cleaned list into dictionary, normalize keys and values.
+        """
+        if not ins_list:
+            return {}
 
-        '''
-        write  function that converts a flat list of instrument metadata into a structured dictionary.
-        Returns:
-            - dict: of all the information contained in the 34118 tag  
-            - and an empty dictionary if parsing fails.  
-     
-        '''
+        ins_dict = {}
+        for item in ins_list:
+            # Split by = or : (first occurrence only)
+            if "=" in item:
+                key, value = item.split("=", 1)
+            elif ":" in item:
+                key, value = item.split(":", 1)
+            else:
+                key, value = item, None
+
+            key = key.strip().title()  # normalize capitalization
+            value = value.strip() if value else None
+
+            # Remove trailing units and spaces
+            if value:
+                value = re.sub(r"\s+", " ", value)
+                value = value.replace("mm", "").replace("kV", "").replace("x", "").strip()
+
+            # Avoid duplicates by checking existing key
+            if key in ins_dict:
+                key = key + "_2"
+
+            ins_dict[key] = value
+
+        return ins_dict
+
+
+
 
     # Open file in write mode and Export SEM Metadata to JSON Format with json.dump
+    #def WriteSEMJson(self,file, semdict):
+       # with open(file, "w") as semoutfile:
+        #    json.dump(semdict, semoutfile)
+        #return
+
+    def clean_instrument_metadata(raw_text):
+    # Remove weird prefixes like "DP_", "AP_", etc., but keep meaningful words
+    # Split on known separators like " = " or ":", ensuring we get key-value pairs
+        pattern = re.compile(r"([A-Za-z0-9_\-\. %\(\)]+?)\s*=\s*([^\n]+)")
+        metadata = {}
+        for match in pattern.findall(raw_text):
+            key = re.sub(r'\s+', ' ', match[0]).strip()
+            value = match[1].strip()
+            metadata[key] = value
+        return metadata
+
+    # Example usage
+        raw_data = """DP_EHT_VAC_READY EHT Vac ready = Yes DP_FIB_MODE FIB Mode = Imaging AP_MAG Mag = 14.63 K X AP_WORKING_DISTANCE WD = 3.198"""
+        cleaned_dict = clean_instrument_metadata(raw_data)
+
+    # Save to JSON (optional)
+        with open("cleaned_metadata.json", "w") as f:
+            json.dump(cleaned_dict, f, indent=4)
+
+        print(len(cleaned_dict), "entries cleaned")
+
+
+
+  # 8. Save combined metadata to JSON
+    def final_out_json(self):
+        out = self.InsMetaDict(self.GetInsMetadata())
+        output_file = "output/sample_image_metadata.json"
+        os.makedirs(os.path.dirname(output_file), exist_ok=True)
+        with open(output_file, "w", encoding="utf-8") as f:
+
+            json.dump(out, f, indent=4, ensure_ascii=False)
+
+        return (output_file)
+
+        # Open file in write mode and Export SEM Metadata to JSON Format with json.dump
     def WriteSEMJson(self,file, semdict):
         with open(file, "w") as semoutfile:
             json.dump(semdict, semoutfile)
